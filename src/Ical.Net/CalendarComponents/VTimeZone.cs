@@ -72,12 +72,22 @@ namespace Ical.Net.CalendarComponents
             }
             else
             {
+                // Fetch the intervals going back a year before the oldest already-selected interval. This avoids cases where
+                // CreateTimeZoneInfo incorrectly calculates TZOFFSETFROM and TZOFFSETTO.
+                var extendedIntervals = intervals;
+                if (earliestYear > 1900)
+                {
+	                var priorIntervals = vTimeZone._nodaZone.GetZoneIntervals(earliest.Minus(Duration.FromDays(365)), Instant.FromDateTimeOffset(DateTimeOffset.Now))
+		                .Where(z => z.HasStart && z.Start != Instant.MinValue);
+	                extendedIntervals = extendedIntervals.Union(priorIntervals).ToList();
+                }
+
                 // first, get the latest standard and daylight intervals, find the oldest recurring date in both, set the RRULES for it, and create a VTimeZoneInfos out of them.
                 //standard
                 var standardIntervals = intervals.Where(x => x.Savings.ToTimeSpan() == new TimeSpan(0)).ToList();
                 var latestStandardInterval = standardIntervals.OrderByDescending(x => x.Start).FirstOrDefault();
                 matchingStandardIntervals = GetMatchingIntervals(standardIntervals, latestStandardInterval, true);
-                var latestStandardTimeZoneInfo = CreateTimeZoneInfo(matchingStandardIntervals, intervals);
+                var latestStandardTimeZoneInfo = CreateTimeZoneInfo(matchingStandardIntervals, extendedIntervals);
                 vTimeZone.AddChild(latestStandardTimeZoneInfo);
 
                 // check to see if there is no active, future daylight savings (ie, America/Phoenix)
@@ -90,7 +100,7 @@ namespace Ical.Net.CalendarComponents
                     {
                         var latestDaylightInterval = daylightIntervals.OrderByDescending(x => x.Start).FirstOrDefault();
                         matchingDaylightIntervals = GetMatchingIntervals(daylightIntervals, latestDaylightInterval, true);
-                        var latestDaylightTimeZoneInfo = CreateTimeZoneInfo(matchingDaylightIntervals, intervals);
+                        var latestDaylightTimeZoneInfo = CreateTimeZoneInfo(matchingDaylightIntervals, extendedIntervals);
                         vTimeZone.AddChild(latestDaylightTimeZoneInfo);
                     }
                 }
