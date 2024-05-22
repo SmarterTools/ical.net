@@ -29,35 +29,34 @@ namespace Ical.Net.CalendarComponents
         public static VTimeZone FromDateTimeZone(string tzId)
             => FromDateTimeZone(tzId, new DateTime(DateTime.Now.Year, 1, 1), includeHistoricalData: false);
 
-        public static VTimeZone FromDateTimeZone(string tzId, DateTime earlistDateTimeToSupport, bool includeHistoricalData)
+        public static VTimeZone FromDateTimeZone(string tzId, DateTime earliestDateTimeToSupport, bool includeHistoricalData)
         {
             var vTimeZone = new VTimeZone(tzId);
 
             var earliestYear = 1900;
-            var earliestMonth = earlistDateTimeToSupport.Month;
-            var earliestDay = earlistDateTimeToSupport.Day;
-            // Support date/times for January 1st of the previous year by default.
-            if (earlistDateTimeToSupport.Year > 1900)
+            var earliestMonth = earliestDateTimeToSupport.Month;
+            var earliestDay = earliestDateTimeToSupport.Day;
+            // To avoid issues when calculating adjustment rules, we need to fetch the intervals going back 10 years before earliestDateTimeToSupport
+            if (earliestDateTimeToSupport.Year > 1900)
             {
-                earliestYear = earlistDateTimeToSupport.Year - 1;
-                // Since we went back a year, we can't still be in a leap-year
+                earliestYear = earliestDateTimeToSupport.Year - 10;
+                // Since we went back 10 years, we can't still be in a leap-year
                 if (earliestMonth == 2 && earliestDay == 29)
 	                earliestDay = 28;
             }
             var earliest = Instant.FromUtc(earliestYear, earliestMonth, earliestDay,
-	            earlistDateTimeToSupport.Hour, earlistDateTimeToSupport.Minute);
+	            earliestDateTimeToSupport.Hour, earliestDateTimeToSupport.Minute);
 
-            // Only include historical data if asked to do so.  Otherwise,
-            // use only the most recent adjustment rules available.
             var intervals = vTimeZone._nodaZone.GetZoneIntervals(earliest, Instant.FromDateTimeOffset(DateTimeOffset.Now))
                 .Where(z => z.HasStart && z.Start != Instant.MinValue)
                 .ToList();
+            var groupedIntervals = GroupIntervals(intervals);
 
             var matchingDaylightIntervals = new List<ZoneInterval>();
             var matchingStandardIntervals = new List<ZoneInterval>();
 
             // if there are no intervals, create at least one standard interval
-            if (!intervals.Any())
+            if (!groupedIntervals.Any())
             {
                 var start = new DateTimeOffset(new DateTime(earliestYear, 1, 1), new TimeSpan(vTimeZone._nodaZone.MaxOffset.Ticks));
                 var interval = new ZoneInterval(
@@ -66,62 +65,51 @@ namespace Ical.Net.CalendarComponents
                     end: Instant.FromDateTimeOffset(start) + Duration.FromHours(1),
                     wallOffset: vTimeZone._nodaZone.MinOffset,
                     savings: Offset.Zero);
-                intervals.Add(interval);
-                var zoneInfo = CreateTimeZoneInfo(intervals, new List<ZoneInterval>(), true, true);
+                var zoneInfo = CreateTimeZoneInfo(new List<ZoneInterval> { interval }, new List<ZoneInterval>(), true, true);
                 vTimeZone.AddChild(zoneInfo);
+
             }
             else
             {
-                // Fetch the intervals going back a year before the oldest already-selected interval. This avoids cases where
-                // CreateTimeZoneInfo incorrectly calculates TZOFFSETFROM and TZOFFSETTO.
-                var extendedIntervals = intervals;
-                if (earliestYear > 1900)
-                {
-	                var priorIntervals = vTimeZone._nodaZone.GetZoneIntervals(earliest.Minus(Duration.FromDays(365)), Instant.FromDateTimeOffset(DateTimeOffset.Now))
-		                .Where(z => z.HasStart && z.Start != Instant.MinValue);
-	                extendedIntervals = extendedIntervals.Union(priorIntervals).ToList();
-                }
+	            ZoneInterval latestStandardInterval = null;
 
-                // first, get the latest standard and daylight intervals, find the oldest recurring date in both, set the RRULES for it, and create a VTimeZoneInfos out of them.
-                //standard
-                var standardIntervals = intervals.Where(x => x.Savings.ToTimeSpan() == new TimeSpan(0)).ToList();
-                var latestStandardInterval = standardIntervals.OrderByDescending(x => x.Start).FirstOrDefault();
-                matchingStandardIntervals = GetMatchingIntervals(standardIntervals, latestStandardInterval, true);
-                var latestStandardTimeZoneInfo = CreateTimeZoneInfo(matchingStandardIntervals, extendedIntervals);
-                vTimeZone.AddChild(latestStandardTimeZoneInfo);
+	            if (groupedIntervals.TryGetValue("standard-1", out matchingStandardIntervals))
+	            {
+		            latestStandardInterval = matchingStandardIntervals.OrderByDescending(x => x.Start).FirstOrDefault();
+		            var latestStandardTimeZoneInfo = CreateTimeZoneInfo(matchingStandardIntervals, intervals);
+		            vTimeZone.AddChild(latestStandardTimeZoneInfo);
+                    // Remove the group to simplify processing historical data
+		            groupedIntervals.Remove("standard-1");
+	            }
 
-                // check to see if there is no active, future daylight savings (ie, America/Phoenix)
-                if (latestStandardInterval != null && (latestStandardInterval.HasEnd ? latestStandardInterval.End : Instant.MaxValue) != Instant.MaxValue)
-                {
-                    //daylight
-                    var daylightIntervals = intervals.Where(x => x.Savings.ToTimeSpan() != new TimeSpan(0)).ToList();
-
-                    if (daylightIntervals.Any())
-                    {
-                        var latestDaylightInterval = daylightIntervals.OrderByDescending(x => x.Start).FirstOrDefault();
-                        matchingDaylightIntervals = GetMatchingIntervals(daylightIntervals, latestDaylightInterval, true);
-                        var latestDaylightTimeZoneInfo = CreateTimeZoneInfo(matchingDaylightIntervals, extendedIntervals);
-                        vTimeZone.AddChild(latestDaylightTimeZoneInfo);
-                    }
-                }
+	            // check to see if there is no active, future daylight savings (ie, America/Phoenix)
+	            if (latestStandardInterval != null &&
+	                (latestStandardInterval.HasEnd ? latestStandardInterval.End : Instant.MaxValue) != Instant.MaxValue)
+	            {
+		            if (groupedIntervals.TryGetValue("daylight-1", out matchingDaylightIntervals))
+		            {
+			            var latestDaylightTimeZoneInfo = CreateTimeZoneInfo(matchingDaylightIntervals, intervals);
+			            vTimeZone.AddChild(latestDaylightTimeZoneInfo);
+						// Remove the group to simplify processing historical data
+						groupedIntervals.Remove("daylight-1");
+		            }
+	            }
             }
 
-            if (!includeHistoricalData || intervals.Count == 1)
+            if (!includeHistoricalData || !groupedIntervals.Any())
             {
                 return vTimeZone;
             }
 
             // then, do the historic intervals, using RDATE for them
-            var historicIntervals = intervals.Where(x => !matchingDaylightIntervals.Contains(x) && !matchingStandardIntervals.Contains(x)).ToList();
-
-            while (historicIntervals.Any(x => x.Start != Instant.MinValue))
+            var historicIntervals = groupedIntervals.Values.SelectMany(x => x).Where(x => x.Start != Instant.MinValue).ToList();
+            while (historicIntervals.Any())
             {
-                var interval = historicIntervals.FirstOrDefault(x => x.Start != Instant.MinValue);
-
-                if (interval == null)
-                {
-                    break;
-                }
+	            var interval = historicIntervals.FirstOrDefault();
+	            if (interval == null)
+	            {
+		            break;
+	            }
 
                 var matchedIntervals = GetMatchingIntervals(historicIntervals, interval);
                 var timeZoneInfo = CreateTimeZoneInfo(matchedIntervals, intervals, false);
@@ -132,8 +120,7 @@ namespace Ical.Net.CalendarComponents
             return vTimeZone;
         }
 
-        private static VTimeZoneInfo CreateTimeZoneInfo(List<ZoneInterval> matchedIntervals, List<ZoneInterval> intervals, bool isRRule = true,
-            bool isOnlyInterval = false)
+        private static VTimeZoneInfo CreateTimeZoneInfo(List<ZoneInterval> matchedIntervals, List<ZoneInterval> intervals, bool isRRule = true, bool isOnlyInterval = false)
         {
             if (matchedIntervals == null || !matchedIntervals.Any())
             {
@@ -148,7 +135,8 @@ namespace Ical.Net.CalendarComponents
 
             var previousInterval = intervals.SingleOrDefault(x => (x.HasEnd ? x.End : Instant.MaxValue) == oldestInterval.Start);
 
-            var delta = new TimeSpan(1, 0, 0);
+            var isDaylight = oldestInterval.Savings.Ticks > 0;
+            var delta = new TimeSpan(isDaylight ? -1 : 1, 0, 0);
 
             if (previousInterval != null)
             {
@@ -159,24 +147,14 @@ namespace Ical.Net.CalendarComponents
                 delta = new TimeSpan();
             }
 
-            var utcOffset = oldestInterval.StandardOffset.ToTimeSpan();
+            var offsetTo = oldestInterval.WallOffset.ToTimeSpan();
 
-            var timeZoneInfo = new VTimeZoneInfo();
-
-            var isDaylight = oldestInterval.Savings.Ticks > 0;
-
-            if (isDaylight)
+            var timeZoneInfo = new VTimeZoneInfo
             {
-                timeZoneInfo.Name = Components.Daylight;
-                timeZoneInfo.OffsetFrom = new UtcOffset(utcOffset);
-                timeZoneInfo.OffsetTo = new UtcOffset(utcOffset - delta);
-            }
-            else
-            {
-                timeZoneInfo.Name = Components.Standard;
-                timeZoneInfo.OffsetFrom = new UtcOffset(utcOffset + delta);
-                timeZoneInfo.OffsetTo = new UtcOffset(utcOffset);
-            }
+                Name = isDaylight ? Components.Daylight : Components.Standard,
+                OffsetTo = new UtcOffset(offsetTo),
+                OffsetFrom = new UtcOffset(offsetTo + delta),
+            };
 
             timeZoneInfo.TimeZoneName = oldestInterval.Name;
 
@@ -185,7 +163,7 @@ namespace Ical.Net.CalendarComponents
 
             if (isRRule)
             {
-                PopulateTimeZoneInfoRecurrenceRules(timeZoneInfo, oldestInterval);
+                PopulateTimeZoneInfoRecurrenceRules(timeZoneInfo, oldestInterval, matchedIntervals);
             }
             else
             {
@@ -198,13 +176,7 @@ namespace Ical.Net.CalendarComponents
         private static List<ZoneInterval> GetMatchingIntervals(List<ZoneInterval> intervals, ZoneInterval intervalToMatch, bool consecutiveOnly = false)
         {
             var matchedIntervals = intervals
-                .Where(x => x.Start != Instant.MinValue)
-                .Where(x => x.IsoLocalStart.Month == intervalToMatch.IsoLocalStart.Month
-                        && x.IsoLocalStart.Hour == intervalToMatch.IsoLocalStart.Hour
-                        && x.IsoLocalStart.Minute == intervalToMatch.IsoLocalStart.Minute
-                        && x.IsoLocalStart.ToDateTimeUnspecified().DayOfWeek == intervalToMatch.IsoLocalStart.ToDateTimeUnspecified().DayOfWeek
-                        && x.WallOffset == intervalToMatch.WallOffset
-                        && x.Name == intervalToMatch.Name)
+                .Where(x => DoIntervalsMatch(x, intervalToMatch))
                 .ToList();
 
             if (!consecutiveOnly)
@@ -236,6 +208,19 @@ namespace Ical.Net.CalendarComponents
             return consecutiveIntervals;
         }
 
+        private static bool DoIntervalsMatch(ZoneInterval intervalA, ZoneInterval intervalB)
+        {
+	        if (intervalA.Start == Instant.MinValue || intervalB.Start == Instant.MinValue)
+		        return false;
+
+	        return intervalA.IsoLocalStart.Month == intervalB.IsoLocalStart.Month &&
+	               intervalA.IsoLocalStart.Hour == intervalB.IsoLocalStart.Hour &&
+	               intervalA.IsoLocalStart.Minute == intervalB.IsoLocalStart.Minute &&
+	               intervalA.IsoLocalStart.ToDateTimeUnspecified().DayOfWeek == intervalB.IsoLocalStart.ToDateTimeUnspecified().DayOfWeek &&
+	               intervalA.WallOffset == intervalB.WallOffset &&
+	               intervalA.Name == intervalB.Name;
+        }
+
         private static void PopulateTimeZoneInfoRecurrenceDates(VTimeZoneInfo tzi, List<ZoneInterval> intervals, TimeSpan delta)
         {
             foreach (var interval in intervals)
@@ -254,15 +239,81 @@ namespace Ical.Net.CalendarComponents
             }
         }
 
-        private static void PopulateTimeZoneInfoRecurrenceRules(VTimeZoneInfo tzi, ZoneInterval interval)
+        private static void PopulateTimeZoneInfoRecurrenceRules(VTimeZoneInfo tzi, ZoneInterval interval, List<ZoneInterval> matchedIntervals)
         {
-            var recurrence = new IntervalRecurrencePattern(interval);
+            var recurrence = new IntervalRecurrencePattern(interval, matchedIntervals);
             tzi.RecurrenceRules.Add(recurrence);
         }
 
+		private static Dictionary<string, List<ZoneInterval>> GroupIntervals(IEnumerable<ZoneInterval> intervals)
+		{
+			var results = new Dictionary<string, List<ZoneInterval>>();
+
+			if (intervals is null)
+				return results;
+
+			var daylightIndex = 1;
+			var standardIndex = 1;
+
+			foreach (var interval in intervals.OrderByDescending(x => x.Start))
+			{
+				string key;
+				// Standard interval
+				if (interval.Savings.ToTimeSpan() == TimeSpan.Zero)
+				{
+					key = $"standard-{standardIndex}";
+
+					if (results.TryGetValue(key, out var standardList))
+					{
+						if (DoIntervalsMatch(standardList[0], interval))
+						{
+							standardList.Add(interval);
+							continue;
+						}
+
+						key = $"standard-{++standardIndex}";
+					}
+
+					results[key] = new List<ZoneInterval> { interval };
+				}
+				// Daylight interval
+				else
+				{
+					key = $"daylight-{daylightIndex}";
+
+					if (results.TryGetValue(key, out var daylightList))
+					{
+						if (DoIntervalsMatch(daylightList[0], interval))
+						{
+							daylightList.Add(interval);
+							continue;
+						}
+
+						key = $"daylight-{++daylightIndex}";
+					}
+
+					results[key] = new List<ZoneInterval> { interval };
+				}
+			}
+
+			return results;
+		}
+
         private class IntervalRecurrencePattern : RecurrencePattern
         {
-            public IntervalRecurrencePattern(ZoneInterval interval)
+	        public IntervalRecurrencePattern(IEnumerable<ZoneInterval> intervals)
+	        {
+		        var firstInterval = intervals.First();
+                Frequency = FrequencyType.Yearly;
+                ByMonth.Add(firstInterval.IsoLocalStart.Month);
+                
+                var date = firstInterval.IsoLocalStart.ToDateTimeUnspecified();
+                var weekday = date.DayOfWeek;
+                var num = DateUtil.WeekOfMonth(date);
+
+	        }
+
+            public IntervalRecurrencePattern(ZoneInterval interval, List<ZoneInterval> matchedIntervals)
             {
                 Frequency = FrequencyType.Yearly;
                 ByMonth.Add(interval.IsoLocalStart.Month);
@@ -270,6 +321,10 @@ namespace Ical.Net.CalendarComponents
                 var date = interval.IsoLocalStart.ToDateTimeUnspecified();
                 var weekday = date.DayOfWeek;
                 var num = DateUtil.WeekOfMonth(date);
+                if (num == 4 && matchedIntervals.Any(x => DateUtil.WeekOfMonth(x.IsoLocalStart.ToDateTimeUnspecified()) == 5))
+                {
+	                num = 5;
+                }
 
                 ByDay.Add(num != 5 ? new WeekDay(weekday, num) : new WeekDay(weekday, -1));
             }
