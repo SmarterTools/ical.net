@@ -36,18 +36,20 @@ namespace Ical.Net.CalendarComponents
             var earliestYear = 1900;
             var earliestMonth = earliestDateTimeToSupport.Month;
             var earliestDay = earliestDateTimeToSupport.Day;
-            // To avoid issues when calculating adjustment rules, we need to fetch the intervals going back 10 years before earliestDateTimeToSupport
+            // Support date/times for January 1st of the previous year by default.
             if (earliestDateTimeToSupport.Year > 1900)
             {
-                earliestYear = earliestDateTimeToSupport.Year - 10;
-                // Since we went back 10 years, we can't still be in a leap-year
+                earliestYear = earliestDateTimeToSupport.Year - 1;
+                // Since we went back a year, we can't still be in a leap-year
                 if (earliestMonth == 2 && earliestDay == 29)
 	                earliestDay = 28;
             }
-            var earliest = Instant.FromUtc(earliestYear, earliestMonth, earliestDay,
+
+            // Retrieving intervals should go back an extra 9 years to make sure we have the data necessary to properly calculate the transitions.
+            var earliestForIntervals = Instant.FromUtc(Math.Max(earliestYear - 9, 1900), earliestMonth, earliestDay,
 	            earliestDateTimeToSupport.Hour, earliestDateTimeToSupport.Minute);
 
-            var intervals = vTimeZone._nodaZone.GetZoneIntervals(earliest, Instant.FromDateTimeOffset(DateTimeOffset.Now))
+            var intervals = vTimeZone._nodaZone.GetZoneIntervals(earliestForIntervals, Instant.FromDateTimeOffset(DateTimeOffset.Now))
                 .Where(z => z.HasStart && z.Start != Instant.MinValue)
                 .ToList();
             var groupedIntervals = GroupIntervals(intervals);
@@ -101,8 +103,10 @@ namespace Ical.Net.CalendarComponents
                 return vTimeZone;
             }
 
-            // then, do the historic intervals, using RDATE for them
-            var historicIntervals = groupedIntervals.Values.SelectMany(x => x).Where(x => x.Start != Instant.MinValue).ToList();
+            // Then do the historic intervals, using RDATE for them. Filter to only intervals starting a year before earliestDateTimeToSupport to reduce serialized size
+            var earliestHistoric = Instant.FromUtc(earliestYear, earliestMonth, earliestDay,
+	            earliestDateTimeToSupport.Hour, earliestDateTimeToSupport.Minute);
+            var historicIntervals = groupedIntervals.Values.SelectMany(x => x).Where(x => x.Start != Instant.MinValue && x.End >= earliestHistoric).ToList();
             while (historicIntervals.Any())
             {
 	            var interval = historicIntervals.FirstOrDefault();
