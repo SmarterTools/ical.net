@@ -182,8 +182,6 @@ public class RecurringComponent : UniqueComponent, IRecurringComponent
         Initialize();
     }
 
-    public virtual void ClearEvaluation() => RecurrenceUtil.ClearEvaluation(this);
-
     public virtual IEnumerable<Occurrence> GetOccurrences(IDateTime startTime = null, IDateTime endTime = null)
         => RecurrenceUtil.GetOccurrences(this, startTime, endTime, EvaluationIncludesReferenceDate);
 

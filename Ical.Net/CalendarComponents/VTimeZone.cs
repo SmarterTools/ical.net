@@ -77,7 +77,7 @@ public class VTimeZone : CalendarComponent
             var interval = new ZoneInterval(
                 name: vTimeZone._nodaZone.Id,
                 start: Instant.FromDateTimeOffset(start),
-                end: Instant.FromDateTimeOffset(start) + Duration.FromHours(1),
+                end: Instant.FromDateTimeOffset(start) + NodaTime.Duration.FromHours(1),
                 wallOffset: vTimeZone._nodaZone.MinOffset,
                 savings: Offset.Zero);
             var zoneInfo = CreateTimeZoneInfo(new List<ZoneInterval> { interval }, new List<ZoneInterval>(), true, true);
@@ -101,8 +101,6 @@ public class VTimeZone : CalendarComponent
             {
                 if (groupedIntervals.TryGetValue("daylight-1", out matchingDaylightIntervals))
                 {
-                    var latestDaylightInterval = daylightIntervals.OrderByDescending(x => x.Start).FirstOrDefault();
-                    matchingDaylightIntervals = GetMatchingIntervals(daylightIntervals, latestDaylightInterval, true);
                     var latestDaylightTimeZoneInfo = CreateTimeZoneInfo(matchingDaylightIntervals, intervals);
                     vTimeZone.AddChild(latestDaylightTimeZoneInfo);
                     // Remove the group to simplify processing historical data
@@ -177,8 +175,8 @@ public class VTimeZone : CalendarComponent
         timeZoneInfo.TimeZoneName = oldestInterval.Name;
 
         var start = oldestInterval.IsoLocalStart.ToDateTimeUnspecified() + delta;
-        timeZoneInfo.Start = new CalDateTime(start) { HasTime = true };
-
+        timeZoneInfo.Start = new CalDateTime(start, true);
+        
         if (isRRule)
         {
             PopulateTimeZoneInfoRecurrenceRules(timeZoneInfo, oldestInterval, matchedIntervals);

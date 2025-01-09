@@ -264,7 +264,7 @@ public class VTimeZoneTest
             Assert.That(serialized.Contains("DTSTART:20071104T020000"), Is.True, "DTSTART:20071104T020000 was not serialized");
         });
     }
-        
+
     [Test, Category("VTimeZone")]
     public void VTimeZoneEuropeBerlinShouldSerializeProperly()
     {
@@ -272,11 +272,14 @@ public class VTimeZoneTest
         var serializer = new CalendarSerializer();
         var serialized = serializer.SerializeToString(iCal);
 
-        Assert.IsTrue(serialized.Contains("TZID:Europe/Berlin"), "Time zone not found in serialization");
-        Assert.IsTrue(serialized.Contains("BEGIN:STANDARD"), "The standard timezone info was not serialized");
-        Assert.IsTrue(serialized.Contains("BEGIN:DAYLIGHT"), "The daylight timezone info was not serialized");
-        Assert.IsTrue(serialized.Contains("TZNAME:CET"), "CET was not serialized");
-        Assert.IsTrue(serialized.Contains("TZNAME:CEST"), "CEST was not serialized");
+        Assert.Multiple(() =>
+        {
+            Assert.That(serialized.Contains("TZID:Europe/Berlin"), Is.True, "Time zone not found in serialization");
+            Assert.That(serialized.Contains("BEGIN:STANDARD"), Is.True, "The standard timezone info was not serialized");
+            Assert.That(serialized.Contains("BEGIN:DAYLIGHT"), Is.True, "The daylight timezone info was not serialized");
+            Assert.That(serialized.Contains("TZNAME:CET"), Is.True, "CET was not serialized");
+            Assert.That(serialized.Contains("TZNAME:CEST"), Is.True, "CEST was not serialized");
+        });
     }
 
     private static Calendar CreateTestCalendar(string tzId, DateTime? earliestTime = null, bool includeHistoricalData = true)
