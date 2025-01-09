@@ -1,4 +1,4 @@
-using Ical.Net.DataTypes;
+﻿using Ical.Net.DataTypes;
 using Ical.Net.Proxies;
 using Ical.Net.Utility;
 using NodaTime;
@@ -51,7 +51,7 @@ namespace Ical.Net.CalendarComponents
                     earliestDay = 28;
             }
             var earliest = Instant.FromUtc(earliestYear, earliestMonth, earliestDay,
-                earlistDateTimeToSupport.Hour, earlistDateTimeToSupport.Minute);
+                earliestDateTimeToSupport.Hour, earliestDateTimeToSupport.Minute);
 
             // Retrieving intervals should go back an extra 9 years to make sure we have the data necessary to properly calculate the transitions.
             var earliestForIntervals = Instant.FromUtc(Math.Max(earliestYear - 9, 1900), earliestMonth, earliestDay,
