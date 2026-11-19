@@ -1,6 +1,8 @@
-﻿using Ical.Net.DataTypes;
+﻿using Ical.Net.CalendarComponents;
+using Ical.Net.DataTypes;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -111,6 +113,9 @@ namespace Ical.Net.Serialization.DataTypes
                 return null;
             }
 
+            var owner = (SerializationContext.Peek() as ICalendarProperty)?.Parent as IRecurrable;
+            var isDateOnlyStart = owner?.Start != null && !owner.Start.HasTime;
+
             // Push the recurrence pattern onto the serialization stack
             SerializationContext.Push(recur);
             var values = new List<string>()
@@ -139,12 +144,20 @@ namespace Ical.Net.Serialization.DataTypes
 
             if (recur.Until != DateTime.MinValue)
             {
-                var serializer = factory.Build(typeof(IDateTime), SerializationContext) as IStringSerializer;
-                if (serializer != null)
+                if (isDateOnlyStart)
                 {
-                    IDateTime until = new CalDateTime(recur.Until);
-                    until.HasTime = true;
-                    values.Add("UNTIL=" + serializer.SerializeToString(until));
+                    // RFC 5545 3.3.10: UNTIL must have the same value type as DTSTART.
+                    values.Add("UNTIL=" + recur.Until.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
+                }
+                else
+                {
+                    var serializer = factory.Build(typeof(IDateTime), SerializationContext) as IStringSerializer;
+                    if (serializer != null)
+                    {
+                        IDateTime until = new CalDateTime(recur.Until);
+                        until.HasTime = true;
+                        values.Add("UNTIL=" + serializer.SerializeToString(until));
+                    }
                 }
             }
 

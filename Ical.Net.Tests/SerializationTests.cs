@@ -524,6 +524,52 @@ END:VTIMEZONE";
             Assert.AreEqual(4, roundTripped.GetOccurrences(rangeStart, rangeEnd).Count);
         }
 
+        [Test]
+        public void ParsedDateRRuleUntilRoundTripsAsDate()
+        {
+            const string ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\nBEGIN:VEVENT\r\nUID:date-until-round-trip\r\n"
+                + "DTSTAMP:20240101T000000Z\r\nDTSTART;VALUE=DATE:20240104\r\nDTEND;VALUE=DATE:20240105\r\n"
+                + "RRULE:FREQ=WEEKLY;UNTIL=20240125\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+            var rangeStart = new CalDateTime(2023, 12, 1);
+            var rangeEnd = new CalDateTime(2024, 3, 1);
+
+            var original = Calendar.Load(ics);
+            var serialized = new CalendarSerializer().SerializeToString(original);
+            var rruleLine = serialized
+                .Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries)
+                .Single(line => line.StartsWith("RRULE", StringComparison.Ordinal));
+            var roundTripped = Calendar.Load(serialized);
+
+            Assert.AreEqual("RRULE:FREQ=WEEKLY;UNTIL=20240125", rruleLine);
+            Assert.AreEqual(4, original.GetOccurrences(rangeStart, rangeEnd).Count);
+            Assert.AreEqual(4, roundTripped.GetOccurrences(rangeStart, rangeEnd).Count);
+        }
+
+        [Test]
+        public void RRuleUntilForDateStartSerializesAsDate()
+        {
+            var e = new CalendarEvent
+            {
+                Start = new CalDateTime(2024, 1, 4),
+                End = new CalDateTime(2024, 1, 5),
+                IsAllDay = true,
+                RecurrenceRules = new List<RecurrencePattern>
+                {
+                    new RecurrencePattern(FrequencyType.Weekly) { Until = new DateTime(2024, 1, 25) },
+                },
+            };
+            var c = new Calendar
+            {
+                Events = { e },
+            };
+
+            var rruleLine = new CalendarSerializer().SerializeToString(c)
+                .Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries)
+                .Single(line => line.StartsWith("RRULE", StringComparison.Ordinal));
+
+            Assert.AreEqual("RRULE:FREQ=WEEKLY;UNTIL=20240125", rruleLine);
+        }
+
         [Test(Description = "PRODID and VERSION should use ical.net values instead of preserving deserialized values")]
         public void LibraryMetadataTests()
         {
