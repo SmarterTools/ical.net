@@ -2379,7 +2379,7 @@ namespace Ical.Net.Tests
         public void Bug2912657()
         {
             var iCal = Calendar.Load(IcsFiles.Bug2912657);
-            var localTzid = iCal.TimeZones[0].TzId;
+            var localTzid = iCal.Events.First().Start.TzId;
 
             // Daily recurrence
             EventOccurrenceTest(
@@ -3611,6 +3611,41 @@ END:VCALENDAR";
                 .SetName("BCL time zone results in a Local DateTimeKind");
             yield return new TestCaseData("UTC", DateTimeKind.Utc)
                 .SetName("UTC results in DateTimeKind.Utc");
+        }
+
+        [Test, TestCaseSource(nameof(UntilBoundsOccurrencesTestCases))]
+        public void UntilBoundsOccurrences(string dtStart, string until, int expectedCount)
+        {
+            var ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:until-test\r\n"
+                + $"{dtStart}\r\nDURATION:PT1H\r\nRRULE:FREQ=DAILY;UNTIL={until}\r\n"
+                + "END:VEVENT\r\nEND:VCALENDAR\r\n";
+            var calendar = Calendar.Load(ics);
+
+            var occurrences = calendar.GetOccurrences(new CalDateTime(2023, 12, 1), new CalDateTime(2024, 2, 1));
+
+            Assert.AreEqual(expectedCount, occurrences.Count);
+        }
+
+        public static IEnumerable<ITestCaseData> UntilBoundsOccurrencesTestCases()
+        {
+            // 09:00 Sydney (UTC+11) on 2024-01-05 is 2024-01-04T22:00:00Z.
+            yield return new TestCaseData("DTSTART;TZID=Australia/Sydney:20240101T090000", "20240104T220000Z", 5)
+                .SetName("UTC UNTIL with positive-offset TZID includes an occurrence at exactly UNTIL");
+            yield return new TestCaseData("DTSTART;TZID=Australia/Sydney:20240101T090000", "20240104T215959Z", 4)
+                .SetName("UTC UNTIL with positive-offset TZID excludes an occurrence after UNTIL");
+            // 09:00 New York (UTC-5) on 2024-01-05 is 2024-01-05T14:00:00Z.
+            yield return new TestCaseData("DTSTART;TZID=America/New_York:20240101T090000", "20240105T140000Z", 5)
+                .SetName("UTC UNTIL with negative-offset TZID includes an occurrence at exactly UNTIL");
+            yield return new TestCaseData("DTSTART;TZID=America/New_York:20240101T090000", "20240105T100000Z", 4)
+                .SetName("UTC UNTIL with negative-offset TZID excludes an occurrence after UNTIL");
+            yield return new TestCaseData("DTSTART:20240101T090000Z", "20240105T090000Z", 5)
+                .SetName("UTC UNTIL with UTC DTSTART");
+            yield return new TestCaseData("DTSTART:20240101T090000", "20240105T090000", 5)
+                .SetName("Floating UNTIL with floating DTSTART");
+            yield return new TestCaseData("DTSTART;TZID=Australia/Sydney:20240101T090000", "20240105T090000", 5)
+                .SetName("Floating UNTIL with TZID DTSTART is read in the DTSTART time zone");
+            yield return new TestCaseData("DTSTART;TZID=Australia/Sydney:20240101T090000", "20240105", 4)
+                .SetName("DATE UNTIL with TZID DTSTART is treated as midnight");
         }
 
         [Test]
