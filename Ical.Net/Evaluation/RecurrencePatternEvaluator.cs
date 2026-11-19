@@ -66,7 +66,12 @@ namespace Ical.Net.Evaluation
             // Convert the UNTIL value to one that matches the same time information as the reference date
             if (r.Until != DateTime.MinValue)
             {
-                r.Until = DateUtil.MatchTimeZone(referenceDate, new CalDateTime(r.Until, referenceDate.TzId)).Value;
+                // RFC 5545 3.3.10: a UTC UNTIL is an absolute instant, so it must be converted to DTSTART's zone rather than
+                // having its clock time reinterpreted in that zone.
+                var until = r.Until.Kind == DateTimeKind.Utc
+                    ? new CalDateTime(r.Until, "UTC")
+                    : new CalDateTime(r.Until, referenceDate.TzId);
+                r.Until = DateUtil.MatchTimeZone(referenceDate, until).Value;
             }
 
             if (r.Frequency > FrequencyType.Secondly && r.BySecond.Count == 0 && referenceDate.HasTime
