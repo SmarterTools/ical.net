@@ -247,8 +247,10 @@ namespace Ical.Net.Serialization.DataTypes
                         {
                             case "UNTIL":
                                 {
-                                    var serializer = factory.Build(typeof(IDateTime), SerializationContext) as IStringSerializer;
-                                    var dt = serializer?.Deserialize(new StringReader(keyValue)) as IDateTime;
+                                    // Use a fresh context: with the RRULE property on this context's stack, the parsed date would share
+                                    // its parameters, and a UTC UNTIL would add an invalid TZID=UTC parameter to the RRULE.
+                                    var serializer = new DateTimeSerializer();
+                                    var dt = serializer.Deserialize(new StringReader(keyValue)) as IDateTime;
                                     if (dt != null)
                                     {
                                         r.Until = dt.Value;

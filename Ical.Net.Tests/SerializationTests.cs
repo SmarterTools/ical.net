@@ -503,6 +503,27 @@ END:VTIMEZONE";
             Assert.IsTrue(!until.EndsWith("Z"));
         }
 
+        [Test]
+        public void ParsedUtcRRuleUntilRoundTripsWithoutTzid()
+        {
+            const string ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\nBEGIN:VEVENT\r\nUID:until-round-trip\r\n"
+                + "DTSTAMP:20240101T000000Z\r\nDTSTART;TZID=Australia/Sydney:20240104T153000\r\nDURATION:PT1H\r\n"
+                + "RRULE:FREQ=WEEKLY;UNTIL=20240125T135959Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+            var rangeStart = new CalDateTime(2023, 12, 1);
+            var rangeEnd = new CalDateTime(2024, 3, 1);
+
+            var original = Calendar.Load(ics);
+            var serialized = new CalendarSerializer().SerializeToString(original);
+            var rruleLine = serialized
+                .Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries)
+                .Single(line => line.StartsWith("RRULE", StringComparison.Ordinal));
+            var roundTripped = Calendar.Load(serialized);
+
+            Assert.AreEqual("RRULE:FREQ=WEEKLY;UNTIL=20240125T135959Z", rruleLine);
+            Assert.AreEqual(4, original.GetOccurrences(rangeStart, rangeEnd).Count);
+            Assert.AreEqual(4, roundTripped.GetOccurrences(rangeStart, rangeEnd).Count);
+        }
+
         [Test(Description = "PRODID and VERSION should use ical.net values instead of preserving deserialized values")]
         public void LibraryMetadataTests()
         {
